@@ -1,0 +1,225 @@
+# ---------------------------------------------------------------------------
+# Aplicación de Estudios de Abogados de Hefesto Studio: entorno de DESARROLLO
+# ---------------------------------------------------------------------------
+#
+# Uso:
+#   docker compose -f deploy/docker-compose.dev.yml --env-file .env up -d
+#
+# QUE CAMBIA RESPECTO A PRODUCCIÓN
+# ---------------------------------
+#  1. Publica puertos de la API, la interfaz y PostgreSQL, para poder abrir un
+#     cliente de base de datos y ver los registros sin entrar por SSH.
+#  2. Monta el código como volumen, para que los cambios se vean al recargar.
+#     En producción NO se hace: si el servidor se compromete, el atacante no
+#     gana acceso al código fuente.
+#  3. Corre el vigilante de plazos cada 5 minutos, para verlo cambiar sin
+#     esperar al día siguiente.
+#  4. No pide contraseña de Redis ni aplica políticas restrictivas.
+#
+# OJO: este entorno NO sirve para un estudio real. Ver el README.
+# ---------------------------------------------------------------------------
+
+name: estudio-abogados-dev
+
+services:
+  caddy:
+    image: caddy:2.11.7-alpine
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+      - "8443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-dev-datos:/data
+      - caddy-dev-config:/config
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:-admin@hefestostudio.cl}
+    depends_on:
+      - api
+      - web
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/api/Dockerfile
+      target: php
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8080"
+    environment:
+      APP_NAME: "Estudios de Abogados (desarrollo)"
+      APP_ENV: local
+      APP_DEBUG: "true"
+      APP_KEY: ${APP_KEY:?falta APP_KEY en el .env}
+      APP_URL: http://localhost:8000
+      SESSION_SECURE_COOKIE: "false"
+      SESSION_SAME_SITE: lax
+      SESSION_DRIVER: database
+
+      LOG_CHANNEL: stderr
+      LOG_LEVEL: debug
+
+      DB_CONNECTION: pgsql
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: ${DB_DATABASE:-estudio_abogados_dev}
+      DB_USERNAME: ${DB_USERNAME:-estudio_app}
+      DB_PASSWORD: ${DB_PASSWORD:?falta DB_PASSWORD en el .env}
+
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      CACHE_STORE: redis
+      QUEUE_CONNECTION: redis
+
+      AUTHENTIK_ISSUER: ${AUTHENTIK_ISSUER:-http://authentik-server:9000/application/o/estudio-abogados/}
+      AUTHENTIK_CLIENT_ID: ${AUTHENTIK_CLIENT_ID:-}
+      AUTHENTIK_CLIENT_SECRET: ${AUTHENTIK_CLIENT_SECRET:-}
+      AUTHENTIK_REDIRECT_URI: http://localhost:8000/api/v1/auth/callback
+      AUTHENTIK_SCOPES: "openid profile email"
+      AUTHENTIK_ALGORITMO: RS256
+
+      DOCUMENTOS_PATH: /var/www/html/storage/app/documentos
+
+      # Días de aviso.Vacío en desarrollo a propósito: así se ve que el
+      # sistema NO marca nada sin un número configurado.
+      ESTUDIO_DIAS_ALERTA_PLAZO: ${ESTUDIO_DIAS_ALERTA_PLAZO:-}
+      ESTUDIO_DIAS_ALERTA_CRITICA: ${ESTUDIO_DIAS_ALERTA_CRITICA:-}
+
+      ESTUDIO_CORRER_MIGRACIONES: "true"
+    volumes:
+      - ../api:/var/www/html
+      - documentos-dev:/var/www/html/storage/app/documentos
+    command: ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8080"]
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+    environment:
+      NUXT_API_BASE: http://api:8080
+      NUXT_PUBLIC_BASE: http://localhost:3000
+      NUXT_SESSION_COOKIE: estudio_session
+
+
+  # -------------------------------------------------------------------------
+  # PostgreSQL.
+  #
+  # DOS ROLES, Y NO UNO
+  # -------------------
+  # `POSTGRES_USER` es el rol de ARRANQUE: la imagen oficial ejecuta
+  # `initdb --username="$POSTGRES_USER"` y ese rol nace superusuario. Solo
+  # se usa para crear la base y para las tareas administrativas. La
+  # aplicacion NUNCA conecta con el.
+  #
+  # El rol de la aplicacion (`DB_USERNAME`) lo crea
+  # `deploy/postgres/inicializar-rol.sh` al inicializar el volumen, con
+  # NOSUPERUSER y NOBYPASSRLS explicitos. Le da la propiedad de la base
+  # para que las migraciones de Laravel puedan crear el esquema.
+  #
+  # POR QUE IMPORTA: la documentacion de PostgreSQL 18 dice que los
+  # superusuarios "always bypass the row security system", y que
+  # `FORCE ROW LEVEL SECURITY` sujeta solo al DUENO de la tabla, no al
+  # superusuario. Con un solo rol las politicas no se aplicarian y el
+  # aislamiento entre empresas seria decorativo. Ver docs/03.
+  # -------------------------------------------------------------------------
+  postgres:
+    image: postgres:18.6
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-estudio_abogados_dev}
+      POSTGRES_USER: ${DB_ADMIN_USERNAME:-estudio_abogados_admin}
+      POSTGRES_PASSWORD: ${DB_ADMIN_PASSWORD:?falta DB_ADMIN_PASSWORD en el .env}
+      # Rol con el que conecta la aplicacion. Lo crea el script de arranque.
+      APP_DB_ROLE: ${DB_USERNAME:-estudio_app}
+      APP_DB_PASSWORD: ${DB_PASSWORD:?falta DB_PASSWORD en el .env}
+    volumes:
+      - postgres-dev-datos:/var/lib/postgresql/data
+      - ./postgres/inicializar-rol.sh:/docker-entrypoint-initdb.d/inicializar-rol.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-estudio_app} -d ${DB_DATABASE:-estudio_abogados_dev}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:8.8.3-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-dev-datos:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  authentik-postgres:
+    image: postgres:18.6
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${AUTHENTIK_POSTGRESQL__NAME:-authentik}
+      POSTGRES_USER: ${AUTHENTIK_POSTGRESQL__USER:-authentik}
+      POSTGRES_PASSWORD: ${AUTHENTIK_POSTGRESQL__PASSWORD:?falta AUTHENTIK_POSTGRESQL__PASSWORD en el .env}
+    volumes:
+      - authentik-dev-postgres-datos:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${AUTHENTIK_POSTGRESQL__USER:-authentik}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  authentik-server:
+    image: ghcr.io/goauthentik/server:2025.10
+    restart: unless-stopped
+    command: server
+    depends_on:
+      authentik-postgres:
+        condition: service_healthy
+    ports:
+      - "9000:9000"
+    environment:
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:?falta AUTHENTIK_SECRET_KEY en el .env}
+      AUTHENTIK_POSTGRESQL__HOST: authentik-postgres
+      AUTHENTIK_POSTGRESQL__USER: ${AUTHENTIK_POSTGRESQL__USER:-authentik}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_POSTGRESQL__PASSWORD}
+      AUTHENTIK_POSTGRESQL__NAME: ${AUTHENTIK_POSTGRESQL__NAME:-authentik}
+      AUTHENTIK_BOOTSTRAP__EMAIL: ${AUTHENTIK_BOOTSTRAP__EMAIL:-akadmin@hefestostudio.cl}
+      AUTHENTIK_BOOTSTRAP__PASSWORD: ${AUTHENTIK_BOOTSTRAP__PASSWORD:?falta AUTHENTIK_BOOTSTRAP__PASSWORD en el .env}
+      AUTHENTIK_BOOTSTRAP__TOKEN: ${AUTHENTIK_BOOTSTRAP__TOKEN:-}
+      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+    volumes:
+      - authentik-dev-media:/media
+
+  authentik-worker:
+    image: ghcr.io/goauthentik/server:2025.10
+    restart: unless-stopped
+    command: worker
+    depends_on:
+      authentik-postgres:
+        condition: service_healthy
+    environment:
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
+      AUTHENTIK_POSTGRESQL__HOST: authentik-postgres
+      AUTHENTIK_POSTGRESQL__USER: ${AUTHENTIK_POSTGRESQL__USER:-authentik}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_POSTGRESQL__PASSWORD}
+      AUTHENTIK_POSTGRESQL__NAME: ${AUTHENTIK_POSTGRESQL__NAME:-authentik}
+
+volumes:
+  postgres-dev-datos:
+  redis-dev-datos:
+  authentik-dev-postgres-datos:
+  authentik-dev-media:
+  documentos-dev:
+  caddy-dev-datos:
+  caddy-dev-config:

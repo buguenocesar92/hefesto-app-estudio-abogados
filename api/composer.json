@@ -1,0 +1,71 @@
+{
+    "name": "hefesto/estudio-abogados",
+    "type": "project",
+    "description": "API de la aplicacion de gestion de estudios de abogados de Hefesto Studio. Software original de Hefesto: NO es un kit de despliegue de una herramienta de terceros. Esta aplicacion NO calcula plazos legales ni interpreta la ley: registra la fecha y el texto de respaldo que el abogado ingresa, y los vigila.",
+    "keywords": ["hefesto", "estudio-abogados", "multitenant", "laravel", "rls"],
+    "license": "proprietary",
+    "require": {
+        "php": "^8.3",
+        "ext-json": "*",
+        "ext-openssl": "*",
+        "laravel/framework": "^13.37",
+        "laravel/tinker": "^2.10",
+        "firebase/php-jwt": "^7.2",
+        "predis/predis": "^3.7"
+    },
+    "require-dev": {
+        "fakerphp/faker": "^1.24",
+        "mockery/mockery": "^1.6",
+        "nunomaduro/collision": "^8.9",
+        "phpunit/phpunit": "^13.4"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/",
+            "Database\\Factories\\": "database/factories/",
+            "Database\\Seeders\\": "database/seeders/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "post-autoload-dump": [
+            "@php artisan package:discover --ansi"
+        ],
+        "post-create-project-cmd": [
+            "@php -r \"file_exists('.env') || copy('.env.example', '.env');\"",
+            "@php artisan key:generate --ansi"
+        ],
+        "test": [
+            "@php artisan config:clear --ansi",
+            "@php artisan test"
+        ],
+        "test:aislamiento": [
+            "@php artisan test --testsuite=Aislamiento"
+        ],
+        "test:documentos": [
+            "@php artisan test --testsuite=Documentos"
+        ],
+        "test:plazos": [
+            "@php artisan test --testsuite=Plazos"
+        ]
+    },
+    "extra": {
+        "laravel": {
+            "dont-discover": []
+        }
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "preferred-install": "dist",
+        "sort-packages": true,
+        "allow-plugins": {
+            "php-http/discovery": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

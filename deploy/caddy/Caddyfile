@@ -1,0 +1,51 @@
+# ---------------------------------------------------------------------------
+# Caddy: el único punto de entrada.
+# ---------------------------------------------------------------------------
+#
+# Reglas de esta configuración:
+#   1. Todo entra por HTTPS. La sesión de un estudio viaja con cookies: sin TLS,
+#      un nombre de expediente viaja en claro.
+#   2. Solo la interfaz responde en la raíz. La API no se publica: el tráfico
+#      pasa por el proxy del servidor de la interfaz, que reenvía la cookie de
+#      sesión y nunca la expone al navegador.
+#   3. Cabeceras de seguridad. `no-store` en todo, porque estas páginas no
+    #      deben quedar en caché de nadie.
+# ---------------------------------------------------------------------------
+
+{
+    email {$ACME_EMAIL}
+    admin off
+}
+
+{$ESTUDIO_DOMINIO} {
+    encode zstd gzip
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "same-origin"
+        Permissions-Policy "geolocation=(), microphone=(), camera=()"
+
+        # Ninguna página de esta aplicación se guarda en una caché intermedia.
+        -Server
+    }
+
+    # La API no se expone directamente. El proxy de la interfaz la llama desde
+    # la red interna.
+    @api path /api/v1/*
+    handle @api {
+        reverse_proxy api:8080
+    }
+
+    handle {
+        reverse_proxy web:3000
+    }
+
+    log {
+        output file /data/acceso.log {
+            roll_size 10mb
+            roll_keep 10
+        }
+    }
+}

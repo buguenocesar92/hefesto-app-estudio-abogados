@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Configuración de PHPUnit de la aplicación de estudios de abogados.
+
+    Hay cuatro suites a propósito:
+      - `Aislamiento`: comprueba que un estudio no vea los datos de otro, y que
+        un abogado no vea la cartera de otro abogado del mismo estudio. Corre
+        contra PostgreSQL de verdad, porque el aislamiento está hecho con Row
+        Level Security, que es una función de PostgreSQL. En SQLite estas
+        pruebas pasarían sin comprobar nada.
+      - `Documentos`  : comprueba que la colisión de versión de un documento se
+        detecte y avise, en vez de sobrescribir.
+      - `Plazos`      : comprueba que un plazo vencido se marque solo, y que no
+        se marque nada cuando el estudio no configuró la alerta.
+      - `Unit`        : el cálculo del nivel de alerta del plazo, sin base de
+        datos. Es una comparación de fechas, no un cálculo de plazos legales.
+-->
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="vendor/autoload.php"
+         colors="true"
+         cacheDirectory=".phpunit.cache"
+         failOnWarning="true"
+         failOnRisky="true"
+         beStrictAboutOutputDuringTests="true">
+    <testsuites>
+        <testsuite name="Unit">
+            <directory>tests/Unit</directory>
+        </testsuite>
+        <testsuite name="Feature">
+            <directory>tests/Feature</directory>
+        </testsuite>
+        <testsuite name="Aislamiento">
+            <directory>tests/Feature/Aislamiento</directory>
+        </testsuite>
+        <testsuite name="Documentos">
+            <directory>tests/Feature/Documentos</directory>
+        </testsuite>
+        <testsuite name="Plazos">
+            <directory>tests/Feature/Plazos</directory>
+        </testsuite>
+    </testsuites>
+    <source>
+        <include>
+            <directory>app</directory>
+        </include>
+    </source>
+    <php>
+        <env name="APP_ENV" value="testing"/>
+        <env name="APP_MAINTENANCE_DRIVER" value="file"/>
+        <env name="BCRYPT_ROUNDS" value="4"/>
+        <env name="CACHE_STORE" value="array"/>
+        <env name="MAIL_MAILER" value="array"/>
+        <env name="QUEUE_CONNECTION" value="sync"/>
+        <env name="SESSION_DRIVER" value="array"/>
+        <env name="TELESCOPE_ENABLED" value="false"/>
+        <!--
+            Base de datos de pruebas.
+
+            IMPORTANTE: debe ser PostgreSQL, no SQLite. El aislamiento entre
+            estudios está implementado con Row Level Security, que es una
+            función de PostgreSQL: en SQLite las pruebas de aislamiento
+            pasarían sin comprobar nada. Ver docs/10.
+        -->
+        <env name="DB_CONNECTION" value="pgsql"/>
+        <env name="DB_DATABASE" value="estudio_abogados_test"/>
+    </php>
+</phpunit>
