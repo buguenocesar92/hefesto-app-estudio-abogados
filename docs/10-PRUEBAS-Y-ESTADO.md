@@ -369,22 +369,33 @@ pendiente:
 4. Probar el escenario que motiva todo el cambio: un estudio intentando leer
    causas o plazos de otro.
 
-### Duda abierta sobre el comando verificador
+### La columna equivocada en el comando verificador: corregida, sin comprobar
 
 Al revisar `EstudioVerificarAislamientoCommand.php` se vio que la consulta que
-lee los atributos del rol pide la columna `usesuper`:
+lee los atributos del rol pedía la columna `usesuper`:
 
 ```sql
 SELECT current_user AS nombre, usesuper AS superusuario, rolbypassrls AS bypass
   FROM pg_roles WHERE rolname = current_user
 ```
 
-La columna que existe en `pg_roles` se llama `rolsuper`, no `usesuper`. **No se
-corrigió**, porque este documento no toca código, y **no se pudo comprobar** si
-eso hace fallar el comando o si el despliegue real usa otra versión del
-archivo. Queda como pendiente explícito: la primera vez que se corra el comando
-contra una base real, este es el primer error que hay que esperar. La misma
-duda aparece en la aplicación `restaurante`.
+La columna que existe en `pg_roles` se llama `rolsuper`, no `usesuper`. Con la
+columna equivocada la consulta revienta, así que el comando no verificaba nada:
+la comprobación del rol —que es la primera y la más grave— quedaba sin hecho
+siempre, sin importar el resto del comando.
+
+**Se corrigió.** La consulta pide ahora `rolsuper`, y el mensaje de fallo dice
+qué se detectó, por qué anula el aislamiento, qué hacer (`POSTGRES_USER` debe
+ser el rol de arranque `estudio_abogados_admin`, que la aplicación nunca usa; el
+rol de la aplicación se crea `NOSUPERUSER NOBYPASSRLS` en
+`deploy/postgres/inicializar-rol.sh`) y dónde está el patrón de referencia
+(`apps/almacen/deploy/postgres/inicializar-rol.sh`).
+
+**Sigue sin comprobarse contra una base real:** en el equipo donde se hizo el
+cambio no había PostgreSQL ni Docker. La corrección es estática. Lo verificado es
+`bash -n` sobre los scripts, YAML válido y el barrido de `tools/validar_apps.py`.
+
+El mismo error estaba en `restaurante`, y se corrigió allá también.
 
 Lo verificado es estático: `bash -n` pasa sobre el script y el `compose` es YAML
 válido, ambas cosas comprobadas por `tools/validar_apps.py`. El razonamiento se
